@@ -217,7 +217,7 @@ ${LEAFCUTTER}/scripts/ds_plots.R \
 	 -f 0.05 \
 	 -m 100 
 
-# move all the results to the outfolder
+# move all the results to the outfolder#
 mv -t $OUTFOLDER leafcutter_ds_cluster_significance.txt leafcutter_ds_effect_sizes.txt ds_plots.pdf ${CODE}_perind_numers.counts.gz
 # clean up
 rm *.bam.junc.${CODE}.sorted.gz ${CODE}_pooled ${CODE}_refined ${CODE}_sortedlibs ${CODE}_perind.counts.gz
@@ -237,6 +237,15 @@ if [[ "$STEP2" == "yes" ]]; then
 # as leafcutter insists on running in its own directory, I can't have multiple step2 jobs running at the same time. 
 # Therefore any step2 job should also wait for any pre-existing step2 jobs before executing
 	if [[ "$STEP1" == "no" ]];then
+		# run step1 anyway to get the junction list updated
+		step1
+		# check that step1 successfully ran
+		for JUNCTIONFILE in `cat $JUNCTIONLIST`;do
+			if [ ! -e $JUNCTIONFILE ];then
+				echo $JUNCTIONFILE does not exist
+				exit 1
+			fi
+		done
 		QHOLD=""
 	fi
 	
@@ -250,9 +259,7 @@ if [[ "$STEP2" == "yes" ]]; then
         sed 's/\(20[0-9]*\)-\([0-9]*\)-\([0-9]*\)/\3\/\2\/\1/g' | 
         column -t
 	}
-	echo "hey there"
 
-	qlong
 
 	# finds all currently queueing or running step2 jobs
 	QHOLDNEW=` qlong | 
