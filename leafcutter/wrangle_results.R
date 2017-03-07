@@ -1,8 +1,8 @@
 # wrangle leafcutter output into something interpretable
 library(data.table)
 library(stringr)
-library(bedr)
 library(dplyr)
+library(optparse)
 
 FDR_limit <- 0.05
 
@@ -11,13 +11,24 @@ setwd("/cluster/project8/vyp/Humphrey_RNASeq_brain/jack_git/Humphrey_RNASeq_brai
 species <- "mouse"
 outFolder <- "/cluster/project8/vyp/Humphrey_RNASeq_brain/jack_git/Humphrey_RNASeq_brain/brain_work_stanford/leafcutter/F210I_norm"
 
-effectSizes <- fread("leafcutter_ds_effect_sizes.txt", stringsAsFactors = F)
+
+outFolder 
+species
+
+
+resultsFolder <- paste0(outFolder,"/results")
+
+if( !dir.exists(resultsFolder)){
+  dir.create(resultsFolder)
+}
+
+effectSizes <- fread(paste0(outFolder,"/leafcutter_ds_effect_sizes.txt"), stringsAsFactors = F)
 effectSizesSplit <-  as.data.frame(str_split_fixed(effectSizes$intron, ":", 4), stringsAsFactors = F)
 names(effectSizesSplit) <- c("chr","start","end","clusterID")
 effectSizes <- cbind( effectSizes, effectSizesSplit)
 effectSizes$cluster <- paste(effectSizesSplit$chr, effectSizesSplit$clusterID, sep = ":")
 
-results <- fread("leafcutter_ds_cluster_significance.txt",stringsAsFactors = F)
+results <- fread(paste0(outFolder, "/leafcutter_ds_cluster_significance.txt"),stringsAsFactors = F)
 results$FDR <- p.adjust( results$p, method = "fdr")
 
 all <- merge(x = results, y = effectSizes, by = "cluster")
@@ -60,26 +71,30 @@ if( species == "mouse"){ intron.database.file <- "/cluster/project8/vyp/Humphrey
                                start = all$end,
                                end = as.numeric( as.character(all$end) ) + 1,
                                clusterID = all$clusterID)
-  all.fiveprime.file <- paste0(outFolder, "/all.fiveprime.bed")
-  all.threeprime.file <- paste0(outFolder, "/all.threeprime.bed")
+  all.fiveprime.file <- paste0(resultsFolder, "/all.fiveprime.bed")
+  all.threeprime.file <- paste0(resultsFolder, "/all.threeprime.bed")
 
   write.table( all.threeprime, all.threeprime.file, col.names = FALSE, row.names = FALSE, quote = FALSE, sep = "\t" )
   write.table( all.fiveprime, all.fiveprime.file, col.names = FALSE, row.names = FALSE, quote = FALSE, sep = "\t" )
 
  
   threeprime.cmd <- paste0( "bedtools intersect -a ", all.threeprime.file, " -b ", intron.database.file,"_threeprime.bed", " -wa -wb -loj -f 1" )
+  
   threeprime_intersect <- fread(threeprime.cmd)
 
   fiveprime.cmd <- paste0( "bedtools intersect -a ", all.fiveprime.file, " -b ", intron.database.file,"_fiveprime.bed", " -wa -wb -loj -f 1" )
+  
   fiveprime_intersect <- fread(fiveprime.cmd)
 
   # now I have two lists of splice site annotation
   # using these, can I annotate each intron in each cluster?
-  cluster <- all[ all$clusterID == "clu_7201" , ]
+  cluster <- all[ all$clusterID == "clu_4879" , ]
 
 
 
 verdict.list <- list()
+coord.list <- list()
+gene.list <- list()
 
 clusters <- unique( all$clusterID ) 
 for( clu in clusters ){
@@ -106,9 +121,17 @@ for( clu in clusters ){
       threeprime_intersect$V2 == as.numeric( x[end] ),]
   } )
 
-  verdict <- c() 
+  verdict <- c()
+  coord <- c()
+  gene <- c() 
   
   for( intron in 1:nrow(cluster) ){
+    coord[intron] <- paste(cluster[intron]$chr,cluster[intron]$start, cluster[intron]$end )
+    tgene <- names(sort(table( tprime[[intron]]$V8 ), decreasing = TRUE)[1])
+    fgene <- names(sort(table( fprime[[intron]]$V8 ), decreasing = TRUE)[1])
+
+    gene[intron] <- ifelse( tgene == ".",  no = fgene, yes = tgene )
+    
     verdict[intron] <- "error"
     if(
     all( tprime[[intron]]$V5 == ".") & all( fprime[[intron]]$V5 == "." )
@@ -131,11 +154,27 @@ for( clu in clusters ){
       if( length( intersect(fp,tp) ) > 0 ){
         verdict[intron] <- "annotated"
       }else{
-        verdict <- "skiptic"
+        verdict[intron] <- "skiptic"
       }
     }
     verdict.list[[clu]] <- verdict
+    coord.list[[clu]] <- coord
+    gene.list[[clu]] <- gene
   }
 }
 
-all$verdict <- unlist(verdict.list)
+# verdict.list and coord.list are not equal lengths. why?
+
+# need to match ideally
+all$verdict <- unlist(verdict.list)[ match( paste( all$chr, all$start, all$end ), unlist(coord.list))]
+
+all$gene <- unlist(gene.list)[ match( paste( all$chr, all$start, all$end ), unlist(coord.list))]
+
+# coord.length <- lapply( coord.list, FUN = length )
+# verdict.length <- lapply( verdict.list, FUN = length )
+
+# #boxplots of the direction of change in each class of intron
+# p <- ggplot( all, aes( x = verdict, y = deltapsi, group = cluster )) + geom_point() + geom_line()
+# print(p);dev.off()
+
+

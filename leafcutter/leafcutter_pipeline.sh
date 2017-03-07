@@ -14,6 +14,9 @@ OUTFOLDER="/cluster/project8/vyp/Humphrey_RNASeq_brain/jack_git/Humphrey_RNASeq_
 SUPPORT=${OUTFOLDER}/${CODE}_support.tab
 SPECIES=human
 LEAFCUTTER="/SAN/vyplab/HuRNASeq/leafcutter" # where you keep the leafcutter repo
+STEP1=yes
+STEP2=yes
+STEP3=yes
 
 
 until [ -z "$1" ]
@@ -104,7 +107,16 @@ for BAMFILE in `cut -f1 $SUPPORT `;do
 
     echo "
     cd ${LEAFCUTTER}/leafcutter
+
     sh ${LEAFCUTTER}/scripts/bam2junc.sh $BAMFILE ${JUNCTIONDIR}/${BAMNAME}.junc
+
+    # check if successful
+	# if not then try running again
+	if [ ! -e ${JUNCTIONDIR}/${BAMNAME}.junc ];then
+		sh ${LEAFCUTTER}/scripts/bam2junc.sh $BAMFILE ${JUNCTIONDIR}/${BAMNAME}.junc
+	fi
+
+
     " > $STEP1_SCRIPT
 
     echo ${JUNCTIONDIR}/${BAMNAME}.junc >> $JUNCTIONLIST 
@@ -225,6 +237,20 @@ rm *.bam.junc.${CODE}.sorted.gz ${CODE}_pooled ${CODE}_refined ${CODE}_sortedlib
 " >> $STEP2_3_SCRIPT
 
 }
+
+# STEP 3 - wrangle the results, annotate them
+
+function step3 {
+	WRANGLE_SCRIPT="/cluster/project8/vyp/Humphrey_RNASeq_brain/jack_git/Humphrey_RNASeq_brain/brain_work_stanford/leafcutter/wrangle_results.R"
+
+	STEP3_SCRIPT=${OUTFOLDER}/cluster/submission/step3_submission.sh
+
+}
+
+
+
+
+# SUBMITTING
 
 if [[ "$STEP1" == "yes" ]]; then
 	QHOLD="-hold_jid leafcutter_step1_${CODE}"
