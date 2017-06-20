@@ -20,7 +20,7 @@ STEP2=yes
 STEP3=yes
 
 # experimental speed up of step1
-STEP1_REGTOOLS=yes
+STEP1_REGTOOLS=no
 
 R=/share/apps/R/bin/R
 STAR_TO_LEAFCUTTER="/cluster/project8/vyp/Humphrey_RNASeq_brain/jack_git/Humphrey_RNASeq_brain/brain_work_stanford/leafcutter/star_to_leafcutter.sh"
@@ -51,6 +51,9 @@ do
         --leafcutter) 
             shift
             LEAFCUTTER=$1;;
+        --mode)
+			shift
+			MODE=$1;;
         --step1)
 			shift
 			STEP1=$1;;
@@ -129,64 +132,143 @@ STEP1_MASTER_TABLE=${OUTFOLDER}/cluster/submission/step1_submission.tab
   if [ -e $STEP1_MASTER_TABLE ]; then rm $STEP1_MASTER_TABLE;fi
   echo "scripts" > $STEP1_MASTER_TABLE
 
+# work out what files are being put into the support
 
-# Convert bam to junction files in batches of four parallel jobs
-for BAMFILE in `cut -f1 $SUPPORT `;do
-	
-	if [ ! -e $BAMFILE ];then
-		echo $BAMFILE does not exist 
-		exit 1
-	fi
-	
-	BAMNAME=`basename $BAMFILE`
-	SCRIPTNAME=`echo $BAMNAME | sed 's/_unique.bam//' ` 
-    STEP1_SCRIPT=${OUTFOLDER}/cluster/submission/step1_${SCRIPTNAME}
+# Mode 1 - support contains list of BAM files
+
+if [[ "$MODE" == "bam" ]];then
+	echo "assuming support contains list of BAM files"
 
 
-    echo "
-    cd ${LEAFCUTTER}/leafcutter
+	# Convert bam to junction files in batches of four parallel jobs
+	for BAMFILE in `cut -f1 $SUPPORT `;do
+		
+		if [ ! -e $BAMFILE ];then
+			echo $BAMFILE does not exist 
+			exit 1
+		fi
+		
+		BAMNAME=`basename $BAMFILE`
+		SCRIPTNAME=`echo $BAMNAME | sed 's/_unique.bam//' ` 
+	    STEP1_SCRIPT=${OUTFOLDER}/cluster/submission/step1_${SCRIPTNAME}
 
-    sh ${LEAFCUTTER}/scripts/bam2junc.sh $BAMFILE ${JUNCTIONDIR}/${BAMNAME}.junc
 
-    # check if successful
-	# if not then try running again
-	if [ ! -e ${JUNCTIONDIR}/${BAMNAME}.junc ];then
-		sh ${LEAFCUTTER}/scripts/bam2junc.sh $BAMFILE ${JUNCTIONDIR}/${BAMNAME}.junc
-	fi
+	    echo "
+	    cd ${LEAFCUTTER}/leafcutter
+
+	    sh ${LEAFCUTTER}/scripts/bam2junc.sh $BAMFILE ${JUNCTIONDIR}/${BAMNAME}.junc
+
+	    # check if successful
+		# if not then try running again
+		if [ ! -e ${JUNCTIONDIR}/${BAMNAME}.junc ];then
+			sh ${LEAFCUTTER}/scripts/bam2junc.sh $BAMFILE ${JUNCTIONDIR}/${BAMNAME}.junc
+		fi
 
 
-    " > $STEP1_SCRIPT
+	    " > $STEP1_SCRIPT
 
-    if [[ $STEP1_REGTOOLS == "yes" ]];then
+	    # use RegTools instead if requested
+	    if [[ $STEP1_REGTOOLS == "yes" ]];then
 
-    	echo "
+	    	echo "
 $REGTOOLS  junctions extract -a 8 -i 50 -I 500000 -o ${JUNCTIONDIR}/${BAMNAME}.junc $BAMFILE 
-    	" > $STEP1_SCRIPT 
-    fi
+	    	" > $STEP1_SCRIPT 
+	    fi
 
-    echo ${JUNCTIONDIR}/${BAMNAME}.junc >> $JUNCTIONLIST 
-    echo $STEP1_SCRIPT >> $STEP1_MASTER_TABLE
-done
+	    echo ${JUNCTIONDIR}/${BAMNAME}.junc >> $JUNCTIONLIST 
+	    echo $STEP1_SCRIPT >> $STEP1_MASTER_TABLE
+	done
 
-NJOBS_STEP1=`wc -l $SUPPORT | awk '{print $1 + 1 }' `
+	NJOBS_STEP1=`wc -l $SUPPORT | awk '{print $1 + 1 }' `
 
-echo "
-#$ -S /bin/bash
-#$ -l h_vmem=4G
-#$ -l tmem=4G
-#$ -l h_rt=24:00:00
-#$ -pe smp 1
-#$ -R y
-#$ -o ${OUTFOLDER}/cluster/out
-#$ -e ${OUTFOLDER}/cluster/error
-#$ -N leafcutter_step1_${CODE}
-#$ -wd ${OUTFOLDER}
-#$ -t 2-${NJOBS_STEP1}
-#$ -tc 20
-echo \$HOSTNAME >&2
-script=\`awk '{if (NR == '\$SGE_TASK_ID') print}' $STEP1_MASTER_TABLE\`
-sh \$script
-" > $STEP1_MASTER
+	echo "
+	#$ -S /bin/bash
+	#$ -l h_vmem=4G
+	#$ -l tmem=4G
+	#$ -l h_rt=24:00:00
+	#$ -pe smp 1
+	#$ -R y
+	#$ -o ${OUTFOLDER}/cluster/out
+	#$ -e ${OUTFOLDER}/cluster/error
+	#$ -N leafcutter_step1_${CODE}
+	#$ -wd ${OUTFOLDER}
+	#$ -t 2-${NJOBS_STEP1}
+	#$ -tc 20
+	echo \$HOSTNAME >&2
+	script=\`awk '{if (NR == '\$SGE_TASK_ID') print}' $STEP1_MASTER_TABLE\`
+	sh \$script
+	" > $STEP1_MASTER
+
+fi
+
+# Mode 2 - support consists of a list of STAR-generated junction files
+if [[ "$MODE" == "STAR" ]];then
+
+	for STARFILE in `cut -f1 $SUPPORT `;do
+	# check if all files in support end in SJ.out.tab (the default setting) or mode is set as "STAR"
+	# create job to convert all STAR files to leafcutter-friendly junction files
+		
+		if [ ! -e $STARFILE ];then
+			echo $STARFILE does not exist 
+			exit 1
+		fi
+		
+		STARNAME=`basename $STARFILE`
+		SCRIPTNAME=`echo $STARNAME | sed 's/SJ\.out\.tab//' ` 
+	    STEP1_SCRIPT=${OUTFOLDER}/cluster/submission/step1_${SCRIPTNAME}
+
+	    echo "
+sh $STAR_TO_LEAFCUTTER $STARFILE ${JUNCTIONDIR}/${STARNAME}.junc
+	    " > $STEP1_SCRIPT
+
+		echo ${JUNCTIONDIR}/${STARNAME}.junc >> $JUNCTIONLIST 
+	    echo $STEP1_SCRIPT >> $STEP1_MASTER_TABLE
+	
+	done
+
+	NJOBS_STEP1=`wc -l $SUPPORT | awk '{print $1 + 1 }' `
+
+	echo "
+	#$ -S /bin/bash
+	#$ -l h_vmem=1G
+	#$ -l tmem=1G
+	#$ -l h_rt=24:00:00
+	#$ -pe smp 1
+	#$ -R y
+	#$ -o ${OUTFOLDER}/cluster/out
+	#$ -e ${OUTFOLDER}/cluster/error
+	#$ -N leafcutter_step1_${CODE}
+	#$ -wd ${OUTFOLDER}
+	#$ -t 2-${NJOBS_STEP1}
+	#$ -tc 20
+	echo \$HOSTNAME >&2
+	script=\`awk '{if (NR == '\$SGE_TASK_ID') print}' $STEP1_MASTER_TABLE\`
+	sh \$script
+	" > $STEP1_MASTER
+
+fi
+
+
+# Mode 3 - support consists of a list of LeafCutter prepared junctions - for some reason 
+
+if [[ "$MODE" == "leafcutter" ]];then
+
+# maybe create sym links to keep leafcutter happy?
+# create list of junction files
+	echo "assuming all input files are leafcutter junctions"
+
+	# create sym link of each leafcutter junction in the junction folder
+	for LEAFJUNC in `cut -f1 $SUPPORT`; do
+		FILENAME=`basename $LEAFJUNC`
+
+		ln --symbolic $LEAFJUNC ${JUNCTIONDIR}/${FILENAME}
+
+		echo ${JUNCTIONDIR}/${FILENAME} >> $JUNCTIONLIST
+
+	done
+
+fi
+
 }
 
 
@@ -234,7 +316,7 @@ echo intron clustering
 
 # it's insisting on running within the LEAFCUTTER/leafcutter directory
 
-python ${LEAFCUTTER}/clustering/leafcutter_cluster.py -j $JUNCTIONLIST -m 50 -o ${CODE} -l 500000
+python ${LEAFCUTTER}/clustering/leafcutter_cluster.py -j $JUNCTIONLIST -m 20 -o ${CODE} -l 500000
 " > $STEP2_SCRIPT
 
 

@@ -11,12 +11,12 @@ FDR_limit <- 0.05
 options(echo=TRUE)
 
 
-outFolder <- "/cluster/project8/vyp/Humphrey_RNASeq_brain/jack_git/Humphrey_RNASeq_brain/brain_work_stanford/leafcutter/FTD_C9/Individual_samples"   
+outFolder <- "/cluster/project8/vyp/Humphrey_RNASeq_brain/jack_git/Humphrey_RNASeq_brain/brain_work_stanford/leafcutter/ENCODE/TARDBP_K562"   
 species <- "human"                                                
-groups_file <- "/cluster/project8/vyp/Humphrey_RNASeq_brain/jack_git/Humphrey_RNASeq_brain/brain_work_stanford/leafcutter/FTD_C9/Individual_samples/A075_ds_support.tab"
-counts_file <- "/cluster/project8/vyp/Humphrey_RNASeq_brain/jack_git/Humphrey_RNASeq_brain/brain_work_stanford/leafcutter/FTD_C9/Individual_samples/A075_perind_numers.counts.gz"
+groups_file <- "/cluster/project8/vyp/Humphrey_RNASeq_brain/jack_git/Humphrey_RNASeq_brain/brain_work_stanford/leafcutter/ENCODE_TARDBP_K562/TARDBP_K562_ds_support.tab"
+counts_file <- "/cluster/project8/vyp/Humphrey_RNASeq_brain/jack_git/Humphrey_RNASeq_brain/brain_work_stanford/leafcutter/ENCODE/TARDBP_K562/TARDBP_K562_perind_numers.counts.gz"
 annotation_code <- "/SAN/vyplab/HuRNASeq/leafcutter/leafcutter/data/gencode_hg38"
-code <- "A075"
+code <- "TARDBP_K562"
 
 
 
@@ -100,7 +100,6 @@ print(head(effectSizes))
 print(head(effectSizesSplit))
 
 
-
 effectSizes <- cbind( effectSizes, effectSizesSplit)
 effectSizes$cluster <- paste(effectSizesSplit$chr, effectSizesSplit$clusterID, sep = ":")
 
@@ -117,6 +116,7 @@ all$end <- as.numeric(all$end)
 
 
 # for each splice site write out a bed file  
+
 all.fiveprime <- data.frame( chr = all$chr,
                              start = all$start,
                              end = as.numeric( as.character(all$start) ) + 1,
@@ -156,13 +156,18 @@ ensemblID.list <- list()
 transcripts.list <- list()
 constitutive.list <- list()
 
+classification.list <- list()
+
+#testing
+#clu <- "clu_798"
+
 clusters <- unique( all$clusterID ) 
 for( clu in clusters ){
   # for each intron in the cluster, check for coverage of both
   # output a vector of string descriptions 
   cluster <- all[ all$clusterID == clu , ]
   
-      # for each intron in the cluster:
+  # for each intron in the cluster:
   #   create vector of overlapping splice sites, indexed by the row of the intersect
   # five prime splice sites
   fprime <- apply( cluster, MAR = 1, FUN = function(x) {
@@ -278,6 +283,85 @@ for( clu in clusters ){
     }
 
   }
+
+  # predicting the event type from the shape of the junctions
+  # easy start - cassette exons
+  print(clu)
+
+  if( nrow(cluster) != 3){ 
+    classification.list[[clu]] <- "." 
+    next
+  }else{
+    classification.list[[clu]] <- "."
+
+    tab <- select(cluster, start, end)
+    
+    # the junctions are sorted by start and end coordinates
+
+    # check for the presence of a junction that spans the entire length of the cluster
+    if( !any(  which( tab$start == min(tab$start) ) %in% which( tab$end == max(tab$end) )  ) ){
+      classification.list[[clu]] <- "."
+      next
+    }
+
+    # therefore for a cassette exon arrangement the longest junction always comes second 
+    if( which( tab$start ==  min(tab$start) & tab$end == max(tab$end ) ) != 2 ){
+     classification.list[[clu]] <- "." 
+     next 
+    }
+
+    # now we know that junction 2 is the parent, junction 1 is the left most child and junction 3 is the right most
+    # check that the end of junction 1 comes before the start of junction 3
+
+    if( tab[1,"end"] > tab[3,"start"] ){
+      classification.list[[clu]] <- "."
+      next
+    }
+
+    # double check the starts and ends
+    if( tab[1, "start"] != tab[2,"start"] | tab[3,"end"] != tab[2,"end"] ){
+      classification.list[[clu]] <- "."
+      next
+    }
+
+    # work out direction of change
+    if( cluster[1, "deltapsi"] > 0 & cluster[3, "deltapsi"] > 0 & cluster[2,"deltapsi"] < 0){
+      classification.list[[clu]] <- "cassette exon - increased"
+    }
+    if( cluster[1, "deltapsi"] < 0 & cluster[3, "deltapsi"] < 0 & cluster[2,"deltapsi"] > 0){
+      classification.list[[clu]] <- "cassette exon - decreased"
+    }
+
+    # work out annotation status
+    if( all( verdict.list[[clu]] == "annotated") ){
+      classification.list[[clu]] <- paste0( classification.list[[clu]], " - annotated")
+    }
+
+    if( verdict.list[[clu]][2] == "annotated" & verdict.list[[clu]][1] != "annotated" & verdict.list[[clu]][3] != "annotated"  ){
+      classification.list[[clu]] <- paste0( classification.list[[clu]], " - cryptic")
+    }
+
+    if( verdict.list[[clu]][2] != "annotated" & verdict.list[[clu]][1] == "annotated" & verdict.list[[clu]][3] == "annotated"  ){
+      classification.list[[clu]] <- paste0( classification.list[[clu]], " - skiptic")
+    }
+
+    # find longest junction in cluster
+    # n_parent <- which( tab$start ==  min(tab$start) & tab$end == max(tab$end ) )
+    # parent <- tab[ n_parent ,]
+    # children <- tab[!n_parent,]
+    # children_list <- c( 
+    #       which( tab$start == parent$start & tab$end < parent$end ),
+
+  # print(n_parent)
+  # print(children_list)
+
+  }
+  
+  # print(clu)
+  # # print(n_parent)
+  # # print(children_list)
+  # print(classification.list[[clu]])
+
 }
 
 # verdict.list and coord.list are not equal lengths. why?
@@ -330,6 +414,12 @@ sig.annotated <- do.call( what = rbind, args = sig.annotated)
 sig.annotated$FDR  <- results$FDR[ match( sig.annotated$clusterID, results$clusterID)]
 sig.annotated$FDR <- signif( sig.annotated$FDR, digits = 3)
 sig.annotated$N  <- results$N[ match( sig.annotated$clusterID, results$clusterID)]
+
+# add classification 
+
+
+sig.annotated$verdict <- unlist(classification.list)[ match(sig.annotated$clusterID, names(classification.list))]
+
 # fudge it by renaming
 all.clusters <- sig.annotated
 all.introns <- all
@@ -382,7 +472,7 @@ plotFolder <- paste0(resultsFolder, "/plots")
 if( ! dir.exists(plotFolder)){ dir.create(plotFolder)}
 
 
-save( all.introns, all.clusters, counts, meta, exon_table, 
+save( all.introns, all.clusters, counts, meta, exon_table, species,
   file = paste0( resultsFolder, "/results.Rdata") )
 
 
@@ -390,18 +480,18 @@ save( all.introns, all.clusters, counts, meta, exon_table,
 quit()
 
 # for all signiicant clusters, make a png of the visualisation
-for( i in 1:nrow(sig.annotated) ){
+# for( i in 1:nrow(sig.annotated) ){
 
-  cluster_to_plot <- paste( sig.annotated$chr[i], sig.annotated$clusterID[i], sep = ":")
-  cluster_gene <- sig.annotated$gene[i]
-  if( cluster_gene == "."){ cluster_gene <- "Null"}
+#   cluster_to_plot <- paste( sig.annotated$chr[i], sig.annotated$clusterID[i], sep = ":")
+#   cluster_gene <- sig.annotated$gene[i]
+#   if( cluster_gene == "."){ cluster_gene <- "Null"}
 
-  out_png <- paste0( plotFolder, "/",sig.annotated$clusterID[i], ".png")
+#   out_png <- paste0( plotFolder, "/",sig.annotated$clusterID[i], ".png")
 
-  png(out_png,width = 1024, height = 1024, units = "px", type = "cairo-png", pointsize = 40)
-  y=t(counts[ cluster_ids==cluster_to_plot, ])
-  make_differential_splicing_plot(y, meta$group, exons_table=exon_table)
-  dev.off()
-}
+#   png(out_png,width = 1024, height = 1024, units = "px", type = "cairo-png", pointsize = 40)
+#   y=t(counts[ cluster_ids==cluster_to_plot, ])
+#   make_differential_splicing_plot(y, meta$group, exons_table=exon_table)
+#   dev.off()
+# }
 
 
