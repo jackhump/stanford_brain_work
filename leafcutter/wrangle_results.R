@@ -1,4 +1,6 @@
-# wrangle leafcutter output into something interpretable
+#### Jack Humphrey 2017
+#### wrangle leafcutter differential splicing output into something interpretable
+
 library(data.table)
 library(leafcutter)
 library(stringr)
@@ -8,15 +10,18 @@ library(readr)
 
 FDR_limit <- 0.05
 
-options(echo=TRUE)
+mode <- "differential_splicing"
+
+#options(echo=TRUE)
 
 
-outFolder <- "/cluster/project8/vyp/Humphrey_RNASeq_brain/jack_git/Humphrey_RNASeq_brain/brain_work_stanford/leafcutter/ENCODE/TARDBP_K562"   
-species <- "human"                                                
-groups_file <- "/cluster/project8/vyp/Humphrey_RNASeq_brain/jack_git/Humphrey_RNASeq_brain/brain_work_stanford/leafcutter/ENCODE_TARDBP_K562/TARDBP_K562_ds_support.tab"
-counts_file <- "/cluster/project8/vyp/Humphrey_RNASeq_brain/jack_git/Humphrey_RNASeq_brain/brain_work_stanford/leafcutter/ENCODE/TARDBP_K562/TARDBP_K562_perind_numers.counts.gz"
-annotation_code <- "/SAN/vyplab/HuRNASeq/leafcutter/leafcutter/data/gencode_hg38"
-code <- "TARDBP_K562"
+### for testing
+# outFolder <- "/cluster/project8/vyp/Humphrey_RNASeq_brain/jack_git/Humphrey_RNASeq_brain/brain_work_stanford/leafcutter/ENCODE/TARDBP_K562"   
+# species <- "human"                                                
+# groups_file <- "/cluster/project8/vyp/Humphrey_RNASeq_brain/jack_git/Humphrey_RNASeq_brain/brain_work_stanford/leafcutter/ENCODE_TARDBP_K562/TARDBP_K562_ds_support.tab"
+# counts_file <- "/cluster/project8/vyp/Humphrey_RNASeq_brain/jack_git/Humphrey_RNASeq_brain/brain_work_stanford/leafcutter/ENCODE/TARDBP_K562/TARDBP_K562_perind_numers.counts.gz"
+# annotation_code <- "/SAN/vyplab/HuRNASeq/leafcutter/leafcutter/data/gencode_hg38"
+# code <- "TARDBP_K562"
 
 
 
@@ -36,17 +41,19 @@ code <- "TARDBP_K562"
 #groups_file <- "/cluster/project8/vyp/Humphrey_RNASeq_brain/jack_git/Humphrey_RNASeq_brain/brain_work_stanford/leafcutter/FTD_C9/FTD_C9_ds_support.tab"                
 #counts_file <- "/cluster/project8/vyp/Humphrey_RNASeq_brain/jack_git/Humphrey_RNASeq_brain/brain_work_stanford/leafcutter/FTD_C9/FTD_C9_perind_numers.counts.gz"               
 #annotation_code <- "/SAN/vyplab/HuRNASeq/leafcutter/leafcutter/data/gencode_hg38"
-#
-#
-opt <- parse_args(OptionParser(option_list=list(
-  make_option( c("-o","--outFolder") ),
-  make_option( "--species", default=NULL, help="which species to use. Either mm10 or hg38 are supported, for now." ),
-  make_option( "--groups_file", default=NULL, help="The support file used in the differential splicing analysis. Columns should be file name and condition"),
-  make_option( "--counts_file", default = NULL, help = "the perind.counts.gz file created by the cluster discovery step"),
-  make_option( "--annotation_code", default=NULL, help = "a path to the annotation files of exons, introns and splice sites"),
-  make_option( "--code", default=NULL, help = "the same dataset-specific code used throughout the pipeline"))
-	)
-)
+
+
+opt <- parse_args(
+  OptionParser(
+    option_list=list(
+      make_option( c("-o","--outFolder") ),
+      make_option( "--species", default=NULL, help="which species to use. Either mm10 or hg38 are supported, for now." ),
+      make_option( "--groups_file", default=NULL, help="The support file used in the differential splicing analysis. Columns should be file name and condition"),
+      make_option( "--counts_file", default = NULL, help = "the perind.counts.gz file created by the cluster discovery step"),
+      make_option( "--annotation_code", default=NULL, help = "a path to the annotation files of exons, introns and splice sites"),
+      make_option( "--code", default=NULL, help = "the same dataset-specific code used throughout the pipeline"))
+	 )
+  )
 outFolder <- opt$outFolder
 species <- opt$species
 groups_file <- opt$groups_file
@@ -55,24 +62,36 @@ annotation_code <- opt$annotation_code
 code <- opt$code
 
 print(outFolder)
-
 print(annotation_code)
 
+# script depends on a set of splice junction annotation files
+# check that the annotation files have been created
+
 for( file in c("_all_introns.bed","_threeprime.bed","_fiveprime.bed", "_all_exons.txt.gz" )){
-  if( ! file.exists( 
-    paste0( annotation_code, file) 
-    ) 
-  ){
+  if( ! file.exists( paste0( annotation_code, file ))){
     stop( paste0( annotation_code, file , " does not exist!"))
   }
 }
 
-# options
+cat("Loading counts from",counts_file,"\n")
+if (!file.exists(counts_file)) stop("File ",counts_file," does not exist")
+counts=read.table(counts_file)
 
-# outFolder 
-# species
-# ds_support
-# exon_file
+cat("Loading metadata from",groups_file,"\n")
+if (!file.exists(groups_file)) stop("File ",groups_file," does not exist")
+meta=read.table(groups_file, header=F, stringsAsFactors = F)
+colnames(meta)=c("sample","group")
+
+exon_file <- paste0(annotation_code, "_all_exons.txt.gz")
+
+exon_table=if (!is.null( exon_file )) {
+  cat("Loading exons from",exon_file,"\n")
+  if (!file.exists(exon_file)) stop("File ",exon_file," does not exist")
+  read_table(exon_file)
+} else {
+  cat("No exon_file provided.\n")
+  NULL
+}
 
 
 resultsFolder <- paste0(outFolder,"/results")
@@ -85,6 +104,7 @@ effect.sizes.file <- paste0(outFolder,"/",code,"_ds_effect_sizes.txt")
 results.file <- paste0(outFolder, "/",code,"_ds_cluster_significance.txt")
 
 # check if the required results files exist
+
 for( file in c(effect.sizes.file, results.file)){
   if( !file.exists(file)){
     stop( paste0(file, " does not exist"))
@@ -96,7 +116,6 @@ effectSizesSplit <-  as.data.frame(str_split_fixed(effectSizes$intron, ":", 4), 
 names(effectSizesSplit) <- c("chr","start","end","clusterID")
 
 print(head(effectSizes))
-
 print(head(effectSizesSplit))
 
 
@@ -131,6 +150,8 @@ all.threeprime.file <- paste0(resultsFolder, "/all.threeprime.bed")
 write.table( all.threeprime, all.threeprime.file, col.names = FALSE, row.names = FALSE, quote = FALSE, sep = "\t" )
 write.table( all.fiveprime, all.fiveprime.file, col.names = FALSE, row.names = FALSE, quote = FALSE, sep = "\t" )
 
+print( "BedTools intersect junctions with list of known splice sites")
+
 # intersect with bedtools to find the annotations of each splice site
 threeprime.cmd <- paste0( "bedtools intersect -a ", all.threeprime.file, " -b ", annotation_code,"_threeprime.bed", " -wa -wb -loj -f 1" )
 
@@ -140,14 +161,15 @@ fiveprime.cmd <- paste0( "bedtools intersect -a ", all.fiveprime.file, " -b ", a
 
 fiveprime_intersect <- fread(fiveprime.cmd)
 
+# remove temporary files
 rm.cmd <- paste("rm ", all.fiveprime.file, all.threeprime.file) 
 system(rm.cmd)
 
 # now I have two lists of splice site annotation
-# using these, can I annotate each intron in each cluster?
 # for testing
 #cluster <- all[ all$clusterID == "clu_4879" , ]
 
+print("Annotating junctions")
 
 verdict.list <- list()
 coord.list <- list()
@@ -155,11 +177,8 @@ gene.list <- list()
 ensemblID.list <- list()
 transcripts.list <- list()
 constitutive.list <- list()
-
 classification.list <- list()
 
-#testing
-#clu <- "clu_798"
 
 clusters <- unique( all$clusterID ) 
 for( clu in clusters ){
@@ -194,14 +213,12 @@ for( clu in clusters ){
   if( length(cluster_gene) == 0){
     cluster_gene == "."
   }
-
-
+  # do the same for EnsemblID
   cluster_ensemblIDs <- names(sort(table(do.call( what = rbind, tprime )$V9), decreasing = TRUE ))
   cluster_ensemblID <- cluster_ensemblIDs[ cluster_ensemblIDs != "." ][1]
   if( length( cluster_ensemblID ) == 0 ){
     cluster_ensemblID == "."
   }
-
 
   verdict <- c()
   coord <- c()
@@ -286,7 +303,7 @@ for( clu in clusters ){
 
   # predicting the event type from the shape of the junctions
   # easy start - cassette exons
-  print(clu)
+  #print(clu)
 
   if( nrow(cluster) != 3){ 
     classification.list[[clu]] <- "." 
@@ -345,12 +362,6 @@ for( clu in clusters ){
       classification.list[[clu]] <- paste0( classification.list[[clu]], " - skiptic")
     }
 
-    # find longest junction in cluster
-    # n_parent <- which( tab$start ==  min(tab$start) & tab$end == max(tab$end ) )
-    # parent <- tab[ n_parent ,]
-    # children <- tab[!n_parent,]
-    # children_list <- c( 
-    #       which( tab$start == parent$start & tab$end < parent$end ),
 
   # print(n_parent)
   # print(children_list)
@@ -364,9 +375,9 @@ for( clu in clusters ){
 
 }
 
-# verdict.list and coord.list are not equal lengths. why?
+print("Preparing results")
 
-# need to match ideally
+# match all the lists together
 all$verdict <- unlist(verdict.list)[ match( paste( all$chr, all$start, all$end ), unlist(coord.list)) ]
 
 all$gene <- unlist(gene.list)[ match( paste( all$chr, all$start, all$end ), unlist(coord.list)) ]
@@ -391,9 +402,6 @@ results$N <- results$df + 1
 sig <- subset(results, FDR < FDR_limit)
 sig$clusterID <- str_split_fixed(sig$cluster, ":", 2)[,2]
 
-# testing
-#clu <- "clu_4879"
-
 sig.annotated <- lapply(sig$clusterID, FUN = function(clu){
   cluster <- all[ all$clusterID == clu, ]
   chr <- unique( cluster$chr )[1] # this should always be one number
@@ -406,9 +414,16 @@ sig.annotated <- lapply(sig$clusterID, FUN = function(clu){
   if( any(grepl( "cryptic", cluster$verdict)) | any( grepl("skiptic", cluster$verdict)) ){
     annotation <- "cryptic"
   }  
-  return( data.frame( clusterID = clu, chr = chr, start = start, end = end, gene = gene, ensemblID = ensemblID, annotation = annotation ) )
+  return( 
+    data.frame( 
+      clusterID = clu, 
+      chr = chr, 
+      start = start, 
+      end = end, 
+      gene = gene, 
+      ensemblID = ensemblID, 
+      annotation = annotation ) )
   })
-
 sig.annotated <- do.call( what = rbind, args = sig.annotated)
 
 sig.annotated$FDR  <- results$FDR[ match( sig.annotated$clusterID, results$clusterID)]
@@ -416,8 +431,6 @@ sig.annotated$FDR <- signif( sig.annotated$FDR, digits = 3)
 sig.annotated$N  <- results$N[ match( sig.annotated$clusterID, results$clusterID)]
 
 # add classification 
-
-
 sig.annotated$verdict <- unlist(classification.list)[ match(sig.annotated$clusterID, names(classification.list))]
 
 # fudge it by renaming
@@ -431,50 +444,131 @@ intron_results <- paste0(resultsFolder, "/per_intron_results.tab")
 write.table( sig.annotated, cluster_results, quote = FALSE, row.names = FALSE, sep = "\t" )
 write.table( all, intron_results, quote = FALSE, row.names = FALSE, sep = "\t" )
 
-# make png graphs of all clusters for visualising
-
-#counts_file <- paste0( outFolder, "/", code, "_perind_numers.counts.gz" )
-
-
-cat("Loading counts from",counts_file,"\n")
-if (!file.exists(counts_file)) stop("File ",counts_file," does not exist")
-counts=read.table(counts_file)
-
-cat("Loading metadata from",groups_file,"\n")
-if (!file.exists(groups_file)) stop("File ",groups_file," does not exist")
-meta=read.table(groups_file, header=F, stringsAsFactors = F)
-colnames(meta)=c("sample","group")
-
-exon_file <- paste0(annotation_code, "_all_exons.txt.gz")
-
-exon_table=if (!is.null( exon_file )) {
-  cat("Loading exons from",exon_file,"\n")
-  if (!file.exists(exon_file)) stop("File ",exon_file," does not exist")
-  read_table(exon_file)
-} else {
-  cat("No exon_file provided.\n")
-  NULL
-}
-
-
-counts=counts[,meta$sample]
+counts <- counts[,meta$sample]
 
 # PCA of the counts matrix
 
+meta$group <- as.factor(meta$group)
+group_names <- levels(meta$group)
 
-meta$group=as.factor(meta$group)
-group_names=levels(meta$group)
+# introns=leafcutter:::get_intron_meta(rownames(counts))
+# cluster_ids=paste(introns$chr,introns$clu,sep = ":")
 
-introns=leafcutter:::get_intron_meta(rownames(counts))
-cluster_ids=paste(introns$chr,introns$clu,sep = ":")
+make_pca <- function(counts,meta){
+  dev <- apply( counts, MAR = 1, FUN = sd )
+  # remove rows with 0 variance
+  counts <- counts[ dev != 0, ]
+  pca <- prcomp( t(counts), scale = TRUE )
+  importance <- signif( summary(pca)$importance[2,], digits = 2) * 100
+  pca <- as.data.frame(pca$x)
+  #names(pca) <- paste0( names(pca), " (", signif( importance, digits =  2) * 100, "%)" )
+  pca$groups <- meta$group[ match( rownames(pca), meta$sample )]
+  return(list( pca, importance) )
+}
 
-plotFolder <- paste0(resultsFolder, "/plots")
-if( ! dir.exists(plotFolder)){ dir.create(plotFolder)}
+# sort out clusters table
+# use on all.clustersv
+fix_clusters <- function(clusters){
+  clusters$FDR <- signif( clusters$FDR, digits = 3)
+  clusters$coord <- paste0( clusters$chr, ":", clusters$start, "-", clusters$end)
+  clusters <- clusters[ order(clusters$FDR, decreasing = FALSE),]
+  # removed ensemblID - this could be an option?
+  #clusters <- select( clusters, clusterID, N, coord, gene, annotation, FDR, verdict)
+  clusters <- select( 
+    clusters, 
+    clusterID, 
+    N, 
+    coord, 
+    gene, 
+    annotation, 
+    FDR)
+  clusters$gene <- paste0("<i>",clusters$gene,"</i>")
+return(clusters)
+}
+
+# use on all.introns
+fix_introns <- function(introns){
+  introns <- select(introns, 
+    clusterID, 
+    gene, 
+    ensemblID, 
+    chr, 
+    start, 
+    end, 
+    verdict, 
+    deltapsi, 
+    #constitutive.score, 
+    transcripts)
+  #introns$constitutive.score <- signif(introns$constitutive.score, digits = 3)
+  introns$deltapsi<- round(introns$deltapsi, digits = 3)
+return(introns)
+}
 
 
-save( all.introns, all.clusters, counts, meta, exon_table, species,
-  file = paste0( resultsFolder, "/results.Rdata") )
+cluster_summary <- function(clusters){
+  summary <- data.frame( 
+              Results = c(
+                paste0("Number of differentially spliced clusters at FDR = 0.05 ") , 
+                        "Fully annotated",
+                        "Contain unannotated junctions"),
+                n = c( nrow(clusters),
+                       nrow( clusters[ clusters$annotation == "annotated", ]),
+                       nrow( clusters[ clusters$annotation == "cryptic", ]) 
+                       ) 
+                )
+  return(summary)
+}
 
+intron_summary <- function(all.introns){
+    summary <- data.frame( 
+                Results = c( "Number of fully annotated junctions",
+                             "Number of junctions with cryptic 5' splice site", 
+                              "Number of junctions with cryptic 3' splice site",  
+                              "Number of junctions with two cryptic splice sites",
+                              "Number of novel junctions that connect two annotated splice sites"),
+
+                  n = c( nrow(all.introns[ all.introns$verdict == "annotated",]),
+                         nrow(all.introns[ all.introns$verdict == "cryptic_fiveprime",]),
+                         nrow(all.introns[ all.introns$verdict == "cryptic_threeprime",]),
+                         nrow(all.introns[ all.introns$verdict == "cryptic_unanchored",]),
+                         nrow(all.introns[ all.introns$verdict == "skiptic",])  
+                  )
+                )
+    return( summary )
+}
+
+# create all the objects for visualisation
+pca <- make_pca(counts, meta = meta)
+clusters <- fix_clusters(all.clusters)
+introns <- fix_introns(all.introns)
+intron_summary <- intron_summary(all.introns)
+cluster_summary <- cluster_summary(all.clusters) 
+introns_to_plot <- leafcutter:::get_intron_meta(rownames(counts))
+cluster_ids <- introns_to_plot$clu 
+
+# to speed up the visualisation interface it would be useful to make all the plots in advance.
+
+
+# plotFolder <- paste0(resultsFolder, "/plots")
+# if( ! dir.exists(plotFolder)){ dir.create(plotFolder)}
+
+# save all the objects needed by Leafcutter viz into single Rdata file
+# include the mode variable 
+
+save( introns, 
+      clusters, 
+      counts, 
+      meta, 
+      exon_table, 
+      species, 
+      pca, 
+      intron_summary, 
+      cluster_summary, 
+      introns_to_plot,
+      cluster_ids,
+      mode,
+      file = paste0( resultsFolder, "/results.Rdata")
+)
 
 
 quit()
